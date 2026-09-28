@@ -1,0 +1,67 @@
+name: diario
+
+on:
+  schedule:
+    - cron: "23 8 * * *"
+  workflow_dispatch:
+    inputs:
+      prueba:
+        description: "Modo prueba (si / no)"
+        type: choice
+        options: ["si", "no"]
+        default: "si"
+      solo:
+        description: "Solo este trabajo (vacío = todos): p, s, w, m, d"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - { n: p, f: p.py, c: "" }
+          - { n: s, f: s.py, c: "" }
+          - { n: w, f: v.py, c: walmart_sv }
+          - { n: m, f: v.py, c: maxi_despensa_sv }
+          - { n: d, f: v.py, c: despensa_don_juan_sv }
+    name: ${{ matrix.n }}
+    steps:
+      - name: omitir
+        id: omitir
+        run: echo "skip=${{ inputs.solo != '' && inputs.solo != matrix.n }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: steps.omitir.outputs.skip != 'true'
+      - uses: actions/setup-python@v5
+        if: steps.omitir.outputs.skip != 'true'
+        with:
+          python-version: "3.12"
+      - name: dependencias
+        if: steps.omitir.outputs.skip != 'true'
+        run: pip install -q requests supabase beautifulsoup4
+      - name: ejecutar
+        if: steps.omitir.outputs.skip != 'true'
+        working-directory: jobs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          MODO_PRUEBA: ${{ github.event_name == 'schedule' && 'no' || inputs.prueba }}
+          SOLO_CADENAS: ${{ matrix.c }}
+        run: python -u ${{ matrix.f }}
+
+  mantener:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/diario.yml/enable"
